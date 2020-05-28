@@ -1,4 +1,32 @@
-# twitter
+---
+title: "nlr30"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Sentiment analysis in Tweets
+
+The observations are the set of tweets by then US president to-be in
+2016 election year. The tweets were sent from different electric
+devices, and the some devices show clear tendency at what time of a
+day the tweets were sent. We will investigate who is using which
+device, and if there are tendency of sentiment that may highlight the
+sender's state of mind.
+
+This analysis is part of practice performed during the online lecture
+in Harvard X for Data Science in 2020. This is a recap of
+
+https://courses.edx.org/courses/course-v1:HarvardX+PH125.6x+1T2020/courseware/82aee45f9f0b4511a7e86bde6b151d08/8f0e14d73cae4e6ea291d7fc66dea2aa/?child=first.
+
+The data were taken from the following site.
+
+http://www.trumptwitterarchive.com.
+
+```{r} 
 library(tidyverse)
 library(ggplot2)
 library(lubridate)
@@ -6,88 +34,100 @@ library(dplyr)
 library(scales)
 library(tidytext)
 library(rmarkdown) 
-
-set.seed(101, sample.kind="Rounding")
-#-------------------------------------------
-# Get raw data from trumptwitterarchive.com
-
+```
+Retrieve the raw data from <trumptwitterarchive.com>.
+```{r}
 url <- 'http://www.trumptwitterarchive.com/data/realdonaldtrump/%s.json'
-#-------------------------------------------
-# Use data from 2015 to 2016
+```
 
+Use data from 2015 to 2016.
+```{r}
 tw1 <- map(2015:2016, ~sprintf(url, .x))  %>% map_df(jsonlite::fromJSON, simplifyDataFrame = T) 
-#-------------------------------------------
-# Remove retweets
+```
+
+Remove retweets.
+```{r}
 tw2 <-tw1 %>% 
   filter(!is_retweet & !str_detect(text, '^"')) %>% 
   mutate(created_at = parse_date_time(created_at, orders="a b! d! H!:M!:S! z!* Y!", tz="EST")) %>% 
   select(source, id_str, text, created_at)
+```
 
-#-------------------------------------------
-# Find tweets that are sent only from Android or iPhone. 
-# Other devices/platform are ignored. 
-# 
+Find tweets that are sent only from Android or iPhone. 
+Other devices/platform are ignored. 
+```{r}
 tw2 <- tw2 %>% arrange(created_at) %>% 
   extract(source, 'source', 'Twitter for (.*)') 
+```
 
-#-------------------------------------------
-# Include these tweets only that are posted during the election campaign. 
-
+Include these tweets only that are posted during the election campaign. 
+```{r}
 tw2 <- tw2 %>%  filter(source %in% c('Android', 'iPhone') & created_at >= ymd('2015-06-17') & created_at < ymd('2016-11-08')) 
-#-------------------------------------------
-# Group data by hour of a day to see if there is any trend in which devices for posting at each hour. 
-# Calculate how much fractions of whole tweets are posted that hour of a day.
+```
 
+Group the data by hours of a day to see if there is any trend in which devices for posting at each hour. 
+Calculate how much fractions of whole tweets are posted that hour of a day.
+
+```{r}
 tw3 <- tw2 %>%
   mutate(hour = hour(with_tz(created_at,'EST'))) %>%
   count(source, hour)  %>% 
   group_by(source)  %>%
   mutate(percent=n/sum(n)) # %>% ungroup() %>%
-
-# Plot it
+```
+Plot the hourly trend.
+```{r}
 tw3 %>% ggplot(aes(x=hour, y=percent, fill=source) )+ 
       geom_bar(aes(fill=source), stat="identity",position="identity") + 
       scale_fill_manual(values = alpha(c("coral1","cyan4"), 0.75)) +
       xlab('Hour of day (EST)')+ 
       scale_y_continuous(labels=percent_format()) 
+```
+There is an obvious peak between 9 am and 5 pm posted from Android. 
+Apparently there are two teams -- 
 
-# There is an obvious peak between 9 am and 5 pm posted from Android. 
-# Apparently there are two teams -- 
-#     1) who use Androlid during morning
-#     2) who use iPhone in the afternoon 
-# 1) is likely Trump himself, and 2) is staff
-#===================================
-# Now we will investigate if there is any difference in sentiment 
-# in the tweets posted by two teams above. 
+   1. who use Androlid during morning
+   2. who use iPhone in the afternoon 
 
-# Remove twitter web site URL
+1) is likely Trump himself, and 2) is staff.
+***
+***
+Now we will investigate if there is any difference in sentiment 
+in the tweets posted by two teams above. 
+
+Remove twitter web site URL
+```{r}
 tw4 <- tw2 %>% mutate(text=str_replace_all(text, 'http://t.co/[A-Za-z\\d]+|&amp;', '')) %>% 
   unnest_tokens(word, text, token='tweets')  %>%
   filter(!word %in% stop_words$word & !str_detect(word, '^\\d+$')) %>%
   mutate(word = str_replace(word, "^'", "")) 
+```
 
-#-----------------------------------
-# These are kind of words that most frequenly appear in tweets
+These are kind of words that most frequenly appear in tweets
+```{r}
 tw4 %>% count(word) %>% arrange(desc(n)) %>% head
+```
 
-#-----------------------------------
-# Now group by device, Android or iPhone
-# remove those words where the samples are less than 32.
+Now group by device, Android or iPhone
+remove those words where the samples are less than 32.
+```{r}
 aoi <- tw4 %>% count(word, source) %>% 
   spread(source, n, fill=0)  %>%
   filter(Android + iPhone >= 32) %>% arrange(desc(Android))
-
 head(aoi)
-#-----------------------------------
-# Selection of dictionaries that sentiment labels are set.
-# We will use nrc sentiment. 
+```
+
+Selection of dictionaries that sentiment labels are set.
+We will use nrc sentiment. 
+```{r}
 nrc <- get_sentiments('nrc') # %>% select(word, sentiment)
 afi <- get_sentiments('afinn') # %>% select(word, sentiment)
 bing <- get_sentiments("bing")
 loug <- get_sentiments("loughran") %>% count(sentiment)
+```
 
-#-----------------------------------
-# Assign sentiment 
+Assign the sentiments. 
+```{r}
 snt1 <- tw4 %>% left_join(nrc, by='word') %>% 
   count(source, sentiment)%>% 
   spread(source, n) %>% 
@@ -97,17 +137,20 @@ snt1 <- tw4 %>% left_join(nrc, by='word') %>%
   mutate(sentiment = fct_reorder(sentiment, desc(Android - iPhone))) 
 
 snt1
-#----------------------
-# Plot sentiment in the order Android is more prone to
+```
+
+Plot sentiment in the order Android is more prone to
+```{r}
 snt1 %>% mutate(sentiment = fct_reorder(sentiment, desc(Android - iPhone))) %>%
     gather("source", "f", 2:3) %>%
     ggplot(aes(sentiment, f, fill=source)) + 
     geom_bar(aes(fill=source), stat='identity', position='identity') +
     scale_fill_manual(values=alpha(c('coral1', 'cyan4'), .7)) + 
     theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
 
-#----------------------
-# Conclusion: sentiment that were sent from Android during morning hours are more negative
-# than those from iPhone in the afternoon. The sentiments that are more often seen in the former are
-# "negative", "anger", "disgust", "sadness", and "fear". 
+## Conclusion
 
+Sentiment that were sent from Android during morning hours are more negative
+than those from iPhone in the afternoon. The sentiments that are more often seen in the former are
+"negative", "anger", "disgust", "sadness", and "fear". 
